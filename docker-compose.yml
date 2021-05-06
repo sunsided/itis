@@ -1,35 +1,390 @@
-# This Docker Compose file can be used to quickly bootup Dgraph Zero
-# and Alpha in different Docker containers.
-
-# It mounts /tmp/data on the host machine to /dgraph within the
-# container. You can change /tmp/data to a more appropriate location.
-# Run `docker-compose up` to start Dgraph.
-
-version: "3.2"
+version: '3.4'
 services:
 
-  zero:
-    image: dgraph/dgraph:v20.11.2
-    volumes:
-      - ./tmp/data:/dgraph
-    ports:
-      - 5080:5080
-      - 6080:6080
-    restart: on-failure
-    command: dgraph zero --my=zero:5080
+  # Nebula Graph
+  # Metadata Service
 
-  alpha:
-    image: dgraph/dgraph:v20.11.2
+  metad0:
+    image: vesoft/nebula-metad:v2.0.1
+    environment:
+      USER: root
+      TZ:   "${TZ}"
+    command:
+      - --meta_server_addrs=metad0:45500,metad1:45500,metad2:45500
+      - --local_ip=metad0
+      - --ws_ip=0.0.0.0
+      - --port=45500
+      - --data_path=/data/meta
+      - --log_dir=/logs
+      - --v=0
+      - --minloglevel=0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://metad0:11000/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    ports:
+      - "45500:45500"
+      - 11000
+      - 11002
     volumes:
-      - ./tmp/data:/dgraph
-    ports:
-      - 8080:8080
-      - 9080:9080
+      - ./nebula-data/data/meta0:/data/meta
+      - ./nebula-data/logs/meta0:/logs
+    networks:
+      nebula-net:
+        ipv4_address: 172.29.1.1
     restart: on-failure
-    command: dgraph alpha --my=alpha:7080 --zero=zero:5080 --whitelist=172.0.0.0:173.0.0.0,192.168.0.1/1 --lru_mb 1024
+    cap_add:
+      - SYS_PTRACE
 
-  ratel:
-    image: dgraph/dgraph:v20.11.2
+  metad1:
+    image: vesoft/nebula-metad:v2.0.1
+    environment:
+      USER: root
+      TZ:   "${TZ}"
+    command:
+      - --meta_server_addrs=metad0:45500,metad1:45500,metad2:45500
+      - --local_ip=metad1
+      - --ws_ip=0.0.0.0
+      - --port=45500
+      - --data_path=/data/meta
+      - --log_dir=/logs
+      - --v=0
+      - --minloglevel=0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://metad1:11000/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     ports:
-      - 8000:8000
-    command: dgraph-ratel
+      - "45501:45500"
+      - 11000
+      - 11002
+    volumes:
+      - ./nebula-data/data/meta1:/data/meta
+      - ./nebula-data/logs/meta1:/logs
+    networks:
+      nebula-net:
+        ipv4_address: 172.29.1.2
+    restart: on-failure
+    cap_add:
+      - SYS_PTRACE
+
+  metad2:
+    image: vesoft/nebula-metad:v2.0.1
+    environment:
+      USER: root
+      TZ:   "${TZ}"
+    command:
+      - --meta_server_addrs=metad0:45500,metad1:45500,metad2:45500
+      - --local_ip=metad2
+      - --ws_ip=0.0.0.0
+      - --port=45500
+      - --data_path=/data/meta
+      - --log_dir=/logs
+      - --v=0
+      - --minloglevel=0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://metad2:11000/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    ports:
+      - "45502:45500"
+      - 11000
+      - 11002
+    volumes:
+      - ./nebula-data/data/meta2:/data/meta
+      - ./nebula-data/logs/meta2:/logs
+    networks:
+      nebula-net:
+        ipv4_address: 172.29.1.3
+    restart: on-failure
+    cap_add:
+      - SYS_PTRACE
+
+  # Nebula Graph
+  # Storage Service
+
+  storaged0:
+    image: vesoft/nebula-storaged:v2.0.1
+    environment:
+      USER: root
+      TZ:   "${TZ}"
+    command:
+      - --meta_server_addrs=metad0:45500,metad1:45500,metad2:45500
+      - --local_ip=storaged0
+      - --ws_ip=0.0.0.0
+      - --port=44500
+      - --data_path=/data/storage
+      - --log_dir=/logs
+      - --v=0
+      - --minloglevel=0
+    depends_on:
+      - metad0
+      - metad1
+      - metad2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://storaged0:12000/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    ports:
+      - "44500:44500"
+      - 12000
+      - 12002
+    volumes:
+      - ./nebula-data/data/storage0:/data/storage
+      - ./nebula-data/logs/storage0:/logs
+    networks:
+      nebula-net:
+        ipv4_address: 172.29.2.1
+    restart: on-failure
+    cap_add:
+      - SYS_PTRACE
+
+  storaged1:
+    image: vesoft/nebula-storaged:v2.0.1
+    environment:
+      USER: root
+      TZ:   "${TZ}"
+    command:
+      - --meta_server_addrs=metad0:45500,metad1:45500,metad2:45500
+      - --local_ip=storaged1
+      - --ws_ip=0.0.0.0
+      - --port=44500
+      - --data_path=/data/storage
+      - --log_dir=/logs
+      - --v=0
+      - --minloglevel=0
+    depends_on:
+      - metad0
+      - metad1
+      - metad2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://storaged1:12000/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    ports:
+      - "44501:44500"
+      - 12000
+      - 12002
+    volumes:
+      - ./nebula-data/data/storage1:/data/storage
+      - ./nebula-data/logs/storage1:/logs
+    networks:
+      nebula-net:
+        ipv4_address: 172.29.2.2
+    restart: on-failure
+    cap_add:
+      - SYS_PTRACE
+
+  storaged2:
+    image: vesoft/nebula-storaged:v2.0.1
+    environment:
+      USER: root
+      TZ:   "${TZ}"
+    command:
+      - --meta_server_addrs=metad0:45500,metad1:45500,metad2:45500
+      - --local_ip=storaged2
+      - --ws_ip=0.0.0.0
+      - --port=44500
+      - --data_path=/data/storage
+      - --log_dir=/logs
+      - --v=0
+      - --minloglevel=0
+    depends_on:
+      - metad0
+      - metad1
+      - metad2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://storaged2:12000/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    ports:
+      - "44502:44500"
+      - 12000
+      - 12002
+    volumes:
+      - ./nebula-data/data/storage2:/data/storage
+      - ./nebula-data/logs/storage2:/logs
+    networks:
+      nebula-net:
+        ipv4_address: 172.29.2.3
+    restart: on-failure
+    cap_add:
+      - SYS_PTRACE
+
+  # Nebula Graph
+  # Query Service
+
+  graphd0:
+    image: vesoft/nebula-graphd:v2.0.1
+    environment:
+      USER: root
+      TZ:   "${TZ}"
+    command:
+      - --meta_server_addrs=metad0:45500,metad1:45500,metad2:45500
+      - --port=3699
+      - --ws_ip=0.0.0.0
+      - --log_dir=/logs
+      - --v=0
+      - --minloglevel=0
+    depends_on:
+      - metad0
+      - metad1
+      - metad2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://graphd0:13000/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    ports:
+      - "3699:3699"
+      - 13000
+      - 13002
+    volumes:
+      - ./nebula-data/logs/graph0:/logs
+    networks:
+      nebula-net:
+        ipv4_address: 172.29.3.1
+    restart: on-failure
+    cap_add:
+      - SYS_PTRACE
+
+  graphd1:
+    image: vesoft/nebula-graphd:v2.0.1
+    environment:
+      USER: root
+      TZ:   "${TZ}"
+    command:
+      - --meta_server_addrs=metad0:45500,metad1:45500,metad2:45500
+      - --port=3700
+      - --ws_ip=0.0.0.0
+      - --log_dir=/logs
+      - --v=0
+      - --minloglevel=0
+    depends_on:
+      - metad0
+      - metad1
+      - metad2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://graphd1:13000/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    ports:
+      - "3700:3700"
+      - 13000
+      - 13002
+    volumes:
+      - ./nebula-data/logs/graph1:/logs
+    networks:
+      nebula-net:
+        ipv4_address: 172.29.3.2
+    restart: on-failure
+    cap_add:
+      - SYS_PTRACE
+
+  graphd2:
+    image: vesoft/nebula-graphd:v2.0.1
+    environment:
+      USER: root
+      TZ:   "${TZ}"
+    command:
+      - --meta_server_addrs=metad0:45500,metad1:45500,metad2:45500
+      - --port=3701
+      - --ws_ip=0.0.0.0
+      - --log_dir=/logs
+      - --v=0
+      - --minloglevel=0
+    depends_on:
+      - metad0
+      - metad1
+      - metad2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://graphd2:13000/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    ports:
+      - "3701:3701"
+      - 13000
+      - 13002
+    volumes:
+      - ./nebula-data/logs/graph2:/logs
+    networks:
+      nebula-net:
+        ipv4_address: 172.29.3.3
+    restart: on-failure
+    cap_add:
+      - SYS_PTRACE
+
+  # Nebula Web
+
+  client:
+    image: vesoft/nebula-http-gateway:v2
+    environment:
+      USER: root
+    ports:
+      - 8080
+    networks:
+      - nebula-web
+
+  web:
+    image: vesoft/nebula-graph-studio:v2
+    environment:
+      USER: root
+      UPLOAD_DIR: ${MAPPING_DOCKER_DIR}
+    ports:
+      - 7001
+    depends_on:
+      - client
+    volumes:
+      - ${UPLOAD_DIR}:${MAPPING_DOCKER_DIR}:rw
+    networks:
+      - nebula-web
+
+  importer:
+    image: vesoft/nebula-importer:v2
+    networks:
+      - nebula-web
+    ports:
+      - 5699
+    volumes:
+      - ${UPLOAD_DIR}:${MAPPING_DOCKER_DIR}:rw
+    command:
+      - "--port=5699"
+      - "--callback=http://nginx:7001/api/import/finish"
+
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/conf.d/nebula.conf:ro
+      - ${UPLOAD_DIR}:${MAPPING_DOCKER_DIR}:rw
+    depends_on:
+      - client
+      - web
+    networks:
+      - nebula-web
+    ports:
+      - 7001:7001
+
+networks:
+  nebula-net:
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.29.0.0/16
+  nebula-web:
