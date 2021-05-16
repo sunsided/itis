@@ -69,6 +69,7 @@ def convert_itis(itis: sqlite3.Connection, itis_md5: str, graph: jsonstreams.Obj
         write_rank_nodes(itis, nodes)
         write_geographic_div_nodes(itis, nodes)
         write_language_nodes(itis, nodes)
+        write_author_nodes(itis, nodes)
         write_taxonomic_unit_nodes(itis, nodes)
         write_vernacular_nodes(itis, nodes)
 
@@ -252,15 +253,12 @@ def write_taxonomic_unit_nodes(itis: sqlite3.Connection, nodes: jsonstreams.Obje
 
 def write_taxonomic_unit_edges(itis: sqlite3.Connection, edges: jsonstreams.Array):
     count = itis.execute('SELECT COUNT(*) FROM taxonomic_units WHERE kingdom_id = 3').fetchone()[0]
-
-    # geo_divs = itis.execute('SELECT tsn, geographic_value, update_date FROM geographic_div')
-    # geo_divs = {t[0]: (t[1], t[2]) for t in geo_divs}
-
     units = itis.execute('''
         SELECT 
             tu.rank_id, tu.tsn, tu.parent_tsn, 
             sl.tsn_accepted, sl.update_date,
-            gd.geographic_value, gd.update_date
+            gd.geographic_value, gd.update_date,
+            tu.taxon_author_id, tu.hybrid_author_id
         FROM taxonomic_units AS tu
         LEFT JOIN synonym_links AS sl ON tu.tsn = sl.tsn
         LEFT JOIN geographic_div AS gd ON tu.tsn = gd.tsn  
@@ -274,6 +272,8 @@ def write_taxonomic_unit_edges(itis: sqlite3.Connection, edges: jsonstreams.Arra
         update_date = unit[4]
         geo_div_value = unit[5]
         geo_div_date = unit[6]
+        taxon_author = unit[7]
+        hybrid_author = unit[8]
 
         with edges.subobject() as edge:
             edge.write('source', __taxonomic_unit_label(parent_tsn))
@@ -300,6 +300,22 @@ def write_taxonomic_unit_edges(itis: sqlite3.Connection, edges: jsonstreams.Arra
                 edge.write('relation', 'has_geographic_div')
                 with edge.subobject('metadata') as meta:
                     meta.write('update_date', geo_div_date)
+
+        if taxon_author > 0:
+            with edges.subobject() as edge:
+                edge.write('source', __taxonomic_unit_label(tsn))
+                edge.write('target', __author_label(taxon_author))
+                edge.write('relation', 'author')
+                with edge.subobject('metadata') as meta:
+                    meta.write('author_type', 'taxon')
+
+        if hybrid_author > 0:
+            with edges.subobject() as edge:
+                edge.write('source', __taxonomic_unit_label(tsn))
+                edge.write('target', __author_label(hybrid_author))
+                edge.write('relation', 'author')
+                with edge.subobject('metadata') as meta:
+                    meta.write('author_type', 'hybrid')
 
 
 def __vernacular_label(vern_id: int) -> str:
@@ -351,6 +367,35 @@ def write_vernacular_edges(itis: sqlite3.Connection, edges: jsonstreams.Array):
             edge.write('source', __taxonomic_unit_label(tsn))
             edge.write('target', __language_label(language))
             edge.write('relation', 'has_language')
+
+
+def __author_label(author_id: int) -> str:
+    return f'author-{author_id}'
+
+
+def write_author_nodes(itis: sqlite3.Connection, nodes: jsonstreams.Object):
+    count = itis.execute('SELECT COUNT(*) FROM taxon_authors_lkp WHERE kingdom_id = 3').fetchone()[0]
+    authors = itis.execute('''
+                            SELECT ta.taxon_author_id,
+                                   ta.short_author, ta.taxon_author, ta.update_date,
+                                   s.shortauthor
+                            FROM taxon_authors_lkp AS ta
+                            LEFT JOIN strippedauthor s on ta.taxon_author_id = s.taxon_author_id
+                            WHERE ta.kingdom_id = 3''')
+    for entry in tqdm(authors, desc='Authors', total=count):
+        author_id = entry[0]
+        short_author = entry[1]
+        long_author = entry[2]
+        update_date = entry[3]
+        stripped = entry[4]
+        assert stripped == short_author
+
+        with nodes.subobject(__author_label(author_id)) as author:
+            author.write('label', short_author)
+            with author.subobject('metadata') as meta:
+                meta.write('type', 'author')
+                meta.write('name', long_author)
+                meta.write('update_date', update_date)
 
 
 def write_graph_attributes(graph, itis_md5):
