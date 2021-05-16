@@ -8,7 +8,7 @@ dependencies:
   - backcall=0.2.0=pyhd3eb1b0_0
   - blas=1.0=mkl
   - bleach=3.3.0=pyhd3eb1b0_0
-  - ca-certificates=2021.1.19=h06a4308_0
+  - ca-certificates=2021.4.13=h06a4308_1
   - cairo=1.14.12=h8948797_3
   - certifi=2020.12.5=py38h06a4308_0
   - cffi=1.14.0=py38h2e261b9_0
@@ -72,11 +72,12 @@ dependencies:
   - nbconvert=5.5.0=py_0
   - nbformat=5.1.2=pyhd3eb1b0_1
   - ncurses=6.2=he6710b0_1
+  - networkx=2.5.1=pyhd3eb1b0_0
   - notebook=6.2.0=py38h06a4308_0
   - numpy=1.19.2=py38h54aff64_0
   - numpy-base=1.19.2=py38hfa32c7d_0
   - olefile=0.46=py_0
-  - openssl=1.1.1j=h27cfd23_0
+  - openssl=1.1.1k=h27cfd23_0
   - packaging=20.9=pyhd3eb1b0_0
   - pandas=1.2.3=py38ha9443f7_0
   - pandoc=2.11=hb0f4dca_0
@@ -131,9 +132,7 @@ dependencies:
   - zlib=1.2.11=h7b6447c_3
   - zstd=1.4.5=h9ceee32_0
   - pip:
-    - future==0.18.2
     - grpcio==1.36.1
-    - httplib2==0.19.1
-    - nebula2-python==2.0.0
+    - jsonstreams==0.6.0
     - protobuf==3.15.5
     - pydgraph==20.7.0
