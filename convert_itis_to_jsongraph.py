@@ -10,6 +10,23 @@ import json
 from dateutil.parser import parse as parse_time
 from tqdm import tqdm
 
+GEOGRAPHIC_DIVS = {
+    'East Pacific': 'east-pacific',
+    'North America': 'north-america',
+    'Indo-West Pacific': 'indo-west-pacific',
+    'Western Atlantic Ocean': 'western-atlantic-ocean',
+    'Eastern Atlantic Ocean': 'eastern-atlantic-ocean',
+    'Antarctica/Southern Ocean': 'antarctica-south-pacific',
+    'Europe & Northern Asia (excluding China)': 'europe-northern-asia',
+    'Caribbean': 'caribbean',
+    'Australia': 'australia',
+    'Africa': 'africa',
+    'Middle America': 'middle-america',
+    'Southern Asia': 'southern-asia',
+    'South America': 'south-america',
+    'Oceania': 'oceania',
+}
+
 
 def convert_itis(itis: sqlite3.Connection, itis_md5: str, graph: jsonstreams.Object):
     #   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -19,6 +36,7 @@ def convert_itis(itis: sqlite3.Connection, itis_md5: str, graph: jsonstreams.Obj
     with graph.subobject('nodes') as nodes:
         write_kingdom_nodes(itis, nodes)
         write_rank_nodes(itis, nodes)
+        write_geographic_div_nodes(itis, nodes)
         write_taxonomic_unit_nodes(itis, nodes)
 
     with graph.subarray('edges') as edges:
@@ -94,6 +112,18 @@ def write_rank_edges(itis: sqlite3.Connection, edges: jsonstreams.Array):
                 edge.write('relation', 'required_parent_of')
 
 
+def __geo_label(geographic_value: str) -> str:
+    assert geographic_value in GEOGRAPHIC_DIVS, geographic_value
+    return GEOGRAPHIC_DIVS[geographic_value]
+
+
+def write_geographic_div_nodes(itis: sqlite3.Connection, nodes: jsonstreams.Object):
+    geos = itis.execute('SELECT DISTINCT geographic_value FROM geographic_div')
+    for (value,) in geos:
+        with nodes.subobject(__geo_label(value)) as rank:
+            rank.write('label', value)
+
+
 def __taxonomic_unit_label(tsn: int) -> str:
     return f'tu-{tsn}'
 
@@ -101,16 +131,21 @@ def __taxonomic_unit_label(tsn: int) -> str:
 def write_taxonomic_unit_nodes(itis: sqlite3.Connection, nodes: jsonstreams.Object):
     count = itis.execute('SELECT COUNT(*) FROM taxonomic_units WHERE kingdom_id = 3').fetchone()[0]
 
+    nodc_ids = itis.execute('SELECT tsn, nodc_id, update_date FROM nodc_ids')
+    nodc_ids = {t[0]: (t[1], t[2]) for t in nodc_ids}
+
     units = itis.execute('''
-                        SELECT tsn,
-                               complete_name, name_usage, 
+                        SELECT tu.tsn,
+                               tu.complete_name, name_usage, 
                                unit_ind1, unit_name1,
                                unit_ind2, unit_name2,
                                unit_ind3, unit_name3,
                                unit_ind4, unit_name4,
-                               initial_time_stamp, update_date
-                        FROM taxonomic_units 
-                        WHERE kingdom_id = 3''')
+                               initial_time_stamp, tu.update_date,
+                               ln.completename
+                        FROM taxonomic_units AS tu
+                        LEFT JOIN longnames AS ln ON ln.tsn = tu.tsn
+                        WHERE tu.kingdom_id = 3''')
 
     for unit in tqdm(units, desc='Units', total=count):
         tsn = unit[0]
@@ -126,6 +161,9 @@ def write_taxonomic_unit_nodes(itis: sqlite3.Connection, nodes: jsonstreams.Obje
         unit_name4 = unit[10]
         initial_time_stamp = unit[11]
         update_date = unit[12]
+        completename = unit[13]
+
+        assert complete_name == completename
 
         initial_time_stamp = parse_time(initial_time_stamp)
         is_accepted = True if name_usage == 'accepted' else False
@@ -155,14 +193,36 @@ def write_taxonomic_unit_nodes(itis: sqlite3.Connection, nodes: jsonstreams.Obje
                 meta.write('update_date', update_date)
                 meta.write('accepted', is_accepted)
 
+                if tsn in nodc_ids:
+                    with meta.subobject('nodc') as nodc:
+                        nodc.write('id', nodc_ids[tsn][0])
+                        nodc.write('update_date', nodc_ids[tsn][1])
+
 
 def write_taxonomic_unit_edges(itis: sqlite3.Connection, edges: jsonstreams.Array):
     count = itis.execute('SELECT COUNT(*) FROM taxonomic_units WHERE kingdom_id = 3').fetchone()[0]
-    units = itis.execute('SELECT rank_id, tsn, parent_tsn FROM taxonomic_units WHERE kingdom_id = 3')
+
+    # geo_divs = itis.execute('SELECT tsn, geographic_value, update_date FROM geographic_div')
+    # geo_divs = {t[0]: (t[1], t[2]) for t in geo_divs}
+
+    units = itis.execute('''
+        SELECT 
+            tu.rank_id, tu.tsn, tu.parent_tsn, 
+            sl.tsn_accepted, sl.update_date,
+            gd.geographic_value, gd.update_date
+        FROM taxonomic_units AS tu
+        LEFT JOIN synonym_links AS sl ON tu.tsn = sl.tsn
+        LEFT JOIN geographic_div AS gd ON tu.tsn = gd.tsn  
+        WHERE kingdom_id = 3
+        ''')
     for unit in tqdm(units, desc='Unit Relationships', total=count):
         rank_id = unit[0]
         tsn = unit[1]
         parent_tsn = unit[2]
+        accepted_tsn = unit[3]
+        update_date = unit[4]
+        geo_div_value = unit[5]
+        geo_div_date = unit[6]
 
         with edges.subobject() as edge:
             edge.write('source', __taxonomic_unit_label(parent_tsn))
@@ -173,6 +233,22 @@ def write_taxonomic_unit_edges(itis: sqlite3.Connection, edges: jsonstreams.Arra
             edge.write('source', __taxonomic_unit_label(tsn))
             edge.write('target', __rank_label(kingdom_id=3, rank_id=rank_id))
             edge.write('relation', 'has_rank')
+
+        if accepted_tsn:
+            with edges.subobject() as edge:
+                edge.write('source', __taxonomic_unit_label(tsn))
+                edge.write('target', __taxonomic_unit_label(accepted_tsn))
+                edge.write('relation', 'synonym_of')
+                with edge.subobject('metadata') as meta:
+                    meta.write('update_date', update_date)
+
+        if geo_div_value:
+            with edges.subobject() as edge:
+                edge.write('source', __taxonomic_unit_label(tsn))
+                edge.write('target', __geo_label(geo_div_value))
+                edge.write('relation', 'has_geographic_div')
+                with edge.subobject('metadata') as meta:
+                    meta.write('update_date', geo_div_date)
 
 
 def write_graph_attributes(graph, itis_md5):
@@ -226,7 +302,12 @@ def main():
     input_path = os.path.join('data', INPUT_DB)
     md5 = __md5(input_path)
 
+    # itis_disk = sqlite3.connect(input_path)
+    # itis = sqlite3.connect(':memory:')
+    # itis_disk.backup(itis)
+    # itis_disk.close()
     itis = sqlite3.connect(input_path)
+
     output_path = os.path.join('data', OUTPUT_JSON)
 
     with jsonstreams.Stream(jsonstreams.Type.OBJECT, filename=output_path, indent=2, pretty=True) as s:
