@@ -27,6 +27,37 @@ GEOGRAPHIC_DIVS = {
     'Oceania': 'oceania',
 }
 
+LANGUAGES = {
+    'English': 'english',
+    'Spanish': 'spanish',
+    'Portuguese': 'portuguese',
+    'French': 'french',
+    'unspecified': 'unspecified',
+    'Hawaiian': 'hawaiian',
+    'German': 'german',
+    'Native American': 'native-american',
+    'Fijan': 'fijan',
+    'Italian': 'italian',
+    'Japanese': 'japanese',
+    'Arabic': 'arabic',
+    'Icelandic': 'icelandic',
+    'Afrikaans': 'afrikaans',
+    'Iglulik Inuit': 'iglulik-inuit',
+    'Chinese': 'chinese',
+    'Hindi': 'hindi',
+    'Dutch': 'dutch',
+    'Hausa': 'hausa',
+    'Greek': 'Greek',
+    'Djuka': 'djuka',
+    'Galibi': 'galibi',
+    'Korean': 'korean',
+    'eng': 'english',
+    'Australian': 'australian',
+    'Malagasy': 'malagasy',
+    'Bengali': 'bengali',
+    'Romanian': 'romanian'
+}
+
 
 def convert_itis(itis: sqlite3.Connection, itis_md5: str, graph: jsonstreams.Object):
     #   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -37,11 +68,14 @@ def convert_itis(itis: sqlite3.Connection, itis_md5: str, graph: jsonstreams.Obj
         write_kingdom_nodes(itis, nodes)
         write_rank_nodes(itis, nodes)
         write_geographic_div_nodes(itis, nodes)
+        write_language_nodes(itis, nodes)
         write_taxonomic_unit_nodes(itis, nodes)
+        write_vernacular_nodes(itis, nodes)
 
     with graph.subarray('edges') as edges:
         write_rank_edges(itis, edges)
         write_taxonomic_unit_edges(itis, edges)
+        write_vernacular_edges(itis, edges)
 
 
 def __kingdom_label(kingdom_id: int) -> str:
@@ -120,8 +154,24 @@ def __geo_label(geographic_value: str) -> str:
 def write_geographic_div_nodes(itis: sqlite3.Connection, nodes: jsonstreams.Object):
     geos = itis.execute('SELECT DISTINCT geographic_value FROM geographic_div')
     for (value,) in geos:
-        with nodes.subobject(__geo_label(value)) as rank:
-            rank.write('label', value)
+        with nodes.subobject(__geo_label(value)) as geo:
+            geo.write('label', value)
+            with geo.subobject('metadata') as meta:
+                meta.write('type', 'geographic-division')
+
+
+def __language_label(value: str) -> str:
+    assert value in LANGUAGES, value
+    return LANGUAGES[value]
+
+
+def write_language_nodes(itis: sqlite3.Connection, nodes: jsonstreams.Object):
+    langs = itis.execute('SELECT DISTINCT language FROM vernaculars')
+    for (value,) in langs:
+        with nodes.subobject(__language_label(value)) as language:
+            language.write('label', value)
+            with language.subobject('metadata') as meta:
+                meta.write('type', 'language')
 
 
 def __taxonomic_unit_label(tsn: int) -> str:
@@ -171,6 +221,7 @@ def write_taxonomic_unit_nodes(itis: sqlite3.Connection, nodes: jsonstreams.Obje
         with nodes.subobject(__taxonomic_unit_label(tsn)) as unit:
             unit.write('label', complete_name)
             with unit.subobject('metadata') as meta:
+                meta.write('type', 'taxonomic-unit')
                 if unit_ind1:
                     meta.write('ind1', unit_ind1)
                 if unit_name1:
@@ -249,6 +300,57 @@ def write_taxonomic_unit_edges(itis: sqlite3.Connection, edges: jsonstreams.Arra
                 edge.write('relation', 'has_geographic_div')
                 with edge.subobject('metadata') as meta:
                     meta.write('update_date', geo_div_date)
+
+
+def __vernacular_label(vern_id: int) -> str:
+    return f'vn-{vern_id}'
+
+
+def write_vernacular_nodes(itis: sqlite3.Connection, nodes: jsonstreams.Object):
+    count = itis.execute('SELECT COUNT(*) FROM taxonomic_units AS tu JOIN vernaculars AS v ON tu.tsn = v.tsn WHERE kingdom_id = 3').fetchone()[0]
+
+    vernaculars = itis.execute('''
+                            SELECT v.vern_id,
+                                   v.update_date,
+                                   v.vernacular_name
+                            FROM taxonomic_units AS tu
+                            JOIN vernaculars AS v ON tu.tsn = v.tsn
+                            WHERE tu.kingdom_id = 3''')
+    for entry in tqdm(vernaculars, desc='Vernaculars', total=count):
+        vern_id = entry[0]
+        update_date = entry[1]
+        name = entry[2]
+
+        with nodes.subobject(__vernacular_label(vern_id)) as vern:
+            vern.write('label', name)
+            with vern.subobject('metadata') as meta:
+                meta.write('type', 'vernacular_name')
+                meta.write('update_date', update_date)
+
+
+def write_vernacular_edges(itis: sqlite3.Connection, edges: jsonstreams.Array):
+    count = itis.execute('SELECT COUNT(*) FROM taxonomic_units AS tu JOIN vernaculars AS v ON tu.tsn = v.tsn WHERE kingdom_id = 3').fetchone()[0]
+    vernaculars = itis.execute('''
+                            SELECT tu.tsn,
+                                   v.vern_id,
+                                   v.language
+                            FROM taxonomic_units AS tu
+                            JOIN vernaculars AS v ON tu.tsn = v.tsn
+                            WHERE tu.kingdom_id = 3''')
+    for entry in tqdm(vernaculars, desc='Vernacular Relationships', total=count):
+        tsn = entry[0]
+        vern_id = entry[1]
+        language = entry[2]
+
+        with edges.subobject() as edge:
+            edge.write('source', __vernacular_label(vern_id))
+            edge.write('target', __taxonomic_unit_label(tsn))
+            edge.write('relation', 'vernacular_of')
+
+        with edges.subobject() as edge:
+            edge.write('source', __taxonomic_unit_label(tsn))
+            edge.write('target', __language_label(language))
+            edge.write('relation', 'has_language')
 
 
 def write_graph_attributes(graph, itis_md5):
